@@ -98,8 +98,6 @@ int main() {
 
 
 
-
-
     lines_num = get_size(filename);
     std::cout << "Number of lines in text file: " << lines_num << std::endl;
 
