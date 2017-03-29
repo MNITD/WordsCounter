@@ -6,7 +6,6 @@
 #include <thread>
 #include <map>
 #include <mutex>
-#include <chrono>
 #include <atomic>
 
 void thread_handler(std::vector<std::string>text, std::map<std::string, unsigned int> & dictionary, std::mutex & dict_mutex, const std::string & symbols);
