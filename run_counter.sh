@@ -55,6 +55,8 @@ run () {
 }
 
 main () {
+    cd $directory
+    directory=$PWD
     for i in `seq 0 $[runsNum-1]`;
     do
           outputs[$i]=" $[i+1] - $(run) "
