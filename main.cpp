@@ -19,7 +19,6 @@ void update_dictionary(std::map<std::string, unsigned int> & general_dict, std::
 void thread_handler(std::vector<std::string>text, std::map<std::string, unsigned int> & dictionary, std::mutex & dict_mutex, const std::string & symbols){
 
     std::map<std::string, unsigned int> temp_dict;
-    std::cout << "from the thread"<< std::endl;
 
     std::for_each (text.begin(), text.end(), [&symbols](std::string & line){reduce_symbols(line, symbols);});
 
@@ -152,7 +151,6 @@ int main() {
 
     threads_num = std::stoi(config_dict[threads_name]);
     lines_num = get_size(config_dict[data_name]);
-    std::cout << "Number of lines in text file: " << lines_num << std::endl;
 
     if (lines_num < threads_num) {
         threads_num = lines_num;
