@@ -86,19 +86,40 @@ void update_dictionary(std::map<std::string, unsigned int> & general_dict, std::
 int main() {
     const std::string symbols_g = ",;.:-()\t!¡¿?\"[]{}&<>+-*/=#'";
     const std::string symbols_c = "=\"";
+    const std::string data_name("infile");
+    const std::string output_a_name("out_by_a");
+    const std::string output_n_name("out_by_n");
+    const std::string threads_name("threads");
+    const std::string config_name("addition/config.txt");
     int lines_num = 0;
-    int threads_num = 5;
+    int threads_num = 0;
     int thread_line_num = 0;
-    std::string filename("addition/2.txt");
-    std::ifstream file(filename);
+    std::ifstream file_data;
+    std::ifstream file_config(config_name);
+    std::ofstream file_output_a;
+    std::ofstream file_output_n;
     std::vector<std::string>text;
+    std::vector<std::string>config_text;
     std::vector<std::thread*> threads;
+    std::vector<std::pair<unsigned  int, std::string>> items;
     std::map<std::string, unsigned int> dictionary;
+    std::map<std::string, std::string> config_dict;
     std::mutex dict_mutex;
 
 
+    read(file_config, 5, &config_text);
+    std::for_each (config_text.begin(), config_text.end(), [&symbols_c](std::string & line){
+        reduce_symbols(line, symbols_c);
+    });
+    std::for_each (config_text.begin(), config_text.end(), [&config_dict](std::string & line){
+        std::vector<std::string> words = split(line);
+        config_dict[words.at(0)] = words.at(1);
+    });
 
-    lines_num = get_size(filename);
+    file_data.open(config_dict[data_name]);
+    threads_num = std::stoi(config_dict[threads_name]);
+
+    lines_num = get_size(config_dict[data_name]);
     std::cout << "Number of lines in text file: " << lines_num << std::endl;
 
     if (lines_num < threads_num) {
@@ -110,19 +131,31 @@ int main() {
 
     for(int i = 0; i < threads_num; i++){
         std::vector<std::string>text_part;
-        read(file, thread_line_num, &text_part);
-        std::cout << "text size: " << text_part.size() << std::endl;
+        read(file_data, thread_line_num, &text_part);
         threads.push_back(new std::thread (thread_handler, text_part, std::ref(dictionary),  std::ref(dict_mutex), symbols_g));
     }
+    file_data.close();
 
     std::for_each (threads.begin(), threads.end(), [](std::thread *thread){
         thread->join();
     });
 
+    file_output_a.open(config_dict[output_a_name]);
+
+    std::for_each (dictionary.begin(), dictionary.end(), [&](std::pair<std::string, unsigned int> pair){
+        file_output_a << pair.first << " - " << pair.second << std::endl;
+        items.push_back(std::make_pair(pair.second, pair.first));
+    });
+
+    file_output_a.close();
 
 
-    std::for_each (dictionary.begin(), dictionary.end(), [](std::pair<std::string, unsigned int> pair){
-        std::cout << pair.first << " - " << pair.second << std::endl;
+    std::sort(items.begin(), items.end(), std::greater<std::pair<unsigned int, std::string>>());
+
+    file_output_n.open(config_dict[output_n_name]);
+
+    std::for_each (items.begin(), items.end(), [&file_output_n](std::pair<unsigned int, std::string> pair){
+        file_output_n << pair.second << " - " << pair.first << std::endl;
     });
 
     return 0;
