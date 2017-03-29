@@ -106,7 +106,7 @@ int main() {
     const std::string output_a_name("out_by_a");
     const std::string output_n_name("out_by_n");
     const std::string threads_name("threads");
-    const std::string config_name("addition/config.txt");
+    const std::string config_name("../addition/config.txt");
     int lines_num = 0;
     int threads_num = 0;
     int thread_line_num = 0;
