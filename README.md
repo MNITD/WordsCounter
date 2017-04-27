@@ -4,7 +4,9 @@ How to use shell file
 
 1) run shell file with terminal
 2) use options to specify conditions:
+
 -c [OPT ARG].. - to specify path to executable (impotrant)
+
 -t [OPT ARG].. - to specify number of times of execution
 
 Example: 
