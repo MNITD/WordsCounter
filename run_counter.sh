@@ -2,7 +2,7 @@
 #script runs WorldsCounter 
 
 #options
-#-c change directory with imgs (default current)
+#-c change directory with executable (default current)
 #-t set number of times to run (default 1)
 
 #default options args
