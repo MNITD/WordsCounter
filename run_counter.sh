@@ -50,6 +50,10 @@ done
 
 #other functions
 
+abs() {
+   [ $1 -lt 0 ] && echo $((-$1)) || echo $1
+}
+
 run () {
     echo $($directory/WordsCounter)
 }
@@ -73,7 +77,7 @@ main () {
     
     for i in `seq 0  $[runsNum-1]`;
     do
-        inaccuracy=$[(arrayTotal[i]-average)*100/average]
+        inaccuracy=$(abs $[(arrayTotal[i]-average)*100/average])
         echo "${outputs[$i]} Inaccuracy: $inaccuracy%"
     done
   
