@@ -66,7 +66,6 @@ main () {
           outputs[$i]=" $[i+1] - $(run) "
           IFS=': ' read -r -a array <<< "${outputs[$i]}"
           arrayTotal[$i]=${array[7]}
-		  echo ${array[7]}
           sumTotal=$[ sumTotal+${arrayTotal[$i]}]
           if  [ ${arrayTotal[$i]} -lt $minTotal ]
           then
