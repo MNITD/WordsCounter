@@ -8,11 +8,11 @@
 #include <mutex>
 #include <atomic>
 
-void thread_handler(std::vector<std::string>text, std::map<std::string, unsigned int> & dictionary, std::mutex & dict_mutex, const std::string & symbols);
-int get_size(std::string & filename);
+//void thread_handler(std::vector<std::string>text, std::map<std::string, unsigned int> & dictionary, std::mutex & dict_mutex, const std::string & symbols);
+//int get_size(std::string & filename);
 std::vector<std::string>  split(std::string & line);
 void reduce_symbols(std::string & line, const std::string & symbols);
-void read(std::ifstream  & file, int amount, std::vector<std::string>*text);
+//void read(std::ifstream  & file, int amount, std::vector<std::string>*text);
 void update_dictionary(std::map<std::string, unsigned int> & general_dict, std::map<std::string, unsigned int> & temp_dict, std::mutex & dict_mutex);
 
 void thread_handler(std::vector<std::string>text, std::map<std::string, unsigned int> & dictionary, std::mutex & dict_mutex, const std::string & symbols){
