@@ -8,12 +8,35 @@
 #include <mutex>
 #include <atomic>
 
-//void thread_handler(std::vector<std::string>text, std::map<std::string, unsigned int> & dictionary, std::mutex & dict_mutex, const std::string & symbols);
-//int get_size(std::string & filename);
-std::vector<std::string>  split(std::string & line);
-void reduce_symbols(std::string & line, const std::string & symbols);
-//void read(std::ifstream  & file, int amount, std::vector<std::string>*text);
-void update_dictionary(std::map<std::string, unsigned int> & general_dict, std::map<std::string, unsigned int> & temp_dict, std::mutex & dict_mutex);
+std::vector<std::string> split(std::string & line){
+    // std::operator>> separates by spaces
+    std::vector<std::string> words;
+    std::string word;
+    std::istringstream split(line);
+
+    while( split >> word ) {
+        words.push_back(word);
+    }
+
+    return words;
+}
+
+void reduce_symbols(std::string & line,const std::string & symbols){
+
+    for(std::string::iterator iter = line.begin(); iter != line.end(); iter++) {
+        if ( symbols.find( *iter ) != std::string::npos ) {
+            *iter = ' ';
+        }
+    }
+}
+
+void update_dictionary(std::map<std::string, unsigned int> & general_dict, std::map<std::string, unsigned int> & temp_dict, std::mutex & dict_mutex){
+
+    std::lock_guard<std::mutex> lock(dict_mutex);
+    std::for_each(temp_dict.begin(), temp_dict.end(), [&general_dict](std::pair<std::string, unsigned int> pair){
+        general_dict[pair.first] += pair.second;
+    });
+}
 
 void thread_handler(std::vector<std::string>text, std::map<std::string, unsigned int> & dictionary, std::mutex & dict_mutex, const std::string & symbols){
 
@@ -43,28 +66,6 @@ int get_size(std::string &filename){
     return size;
 }
 
-std::vector<std::string> split(std::string & line){
-    // std::operator>> separates by spaces
-    std::vector<std::string> words;
-    std::string word;
-    std::istringstream split(line);
-
-    while( split >> word ) {
-        words.push_back(word);
-    }
-
-    return words;
-}
-
-void reduce_symbols(std::string & line,const std::string & symbols){
-
-    for(std::string::iterator iter = line.begin(); iter != line.end(); iter++) {
-        if ( symbols.find( *iter ) != std::string::npos ) {
-            *iter = ' ';
-        }
-    }
-}
-
 void read(std::ifstream  & file, int amount, std::vector<std::string>*text){
 
     int i = 0;
@@ -74,14 +75,6 @@ void read(std::ifstream  & file, int amount, std::vector<std::string>*text){
         text->push_back(line);
         i++;
     }
-}
-
-void update_dictionary(std::map<std::string, unsigned int> & general_dict, std::map<std::string, unsigned int> & temp_dict, std::mutex & dict_mutex){
-
-    std::lock_guard<std::mutex> lock(dict_mutex);
-    std::for_each(temp_dict.begin(), temp_dict.end(), [&general_dict](std::pair<std::string, unsigned int> pair){
-        general_dict[pair.first] += pair.second;
-    });
 }
 
 inline std::chrono::high_resolution_clock::time_point get_current_time_fenced() {
