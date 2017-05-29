@@ -13,11 +13,18 @@
 
 template<typename T>
 struct QueueWrapper {
-    bool done = false;
-    bool notified = false;
+    std::atomic<bool> done{false};
+//    std::atomic<bool> notified{false};
+//    int number{0};
     std::queue<T> queue;
     std::mutex queue_mutex;
     std::condition_variable cond_var;
+
+    QueueWrapper() {
+        done = false;
+//        notified = false;
+//        number = 0;
+    }
 };
 
 std::vector<std::string> split(std::string &line) {
@@ -39,64 +46,6 @@ void reduce_symbols(std::string &line, const std::string &symbols) {
         if (symbols.find(*iter) != std::string::npos) {
             *iter = ' ';
         }
-    }
-}
-
-void update_dictionary(QueueWrapper<std::map<std::string, unsigned int>> &dict_qw,
-                        std::map<std::string, unsigned int> &general_dict) {
-
-    std::unique_lock<std::mutex> dict_lock(dict_qw.queue_mutex);
-
-    while (!dict_qw.done) {
-        while (!dict_qw.notified && !dict_qw.done) {  // loop to avoid spurious wakeups
-            dict_qw.cond_var.wait(dict_lock);
-        }
-        std::map<std::string, unsigned int> temp_dict;
-
-        temp_dict = dict_qw.queue.front();
-        dict_qw.queue.pop();
-
-        std::for_each(temp_dict.begin(), temp_dict.end(), [&general_dict](std::pair<std::string, unsigned int> pair) {
-            general_dict[pair.first] += pair.second;
-        });
-        dict_qw.notified = false;
-    }
-}
-
-void process_block(QueueWrapper<std::vector<std::string>> &block_qw,
-                   QueueWrapper<std::map<std::string, unsigned int>> &dict_qw,
-                   const std::string &symbols) {
-
-    std::unique_lock<std::mutex> block_lock(block_qw.queue_mutex);
-
-    while (!block_qw.done) {
-        while (!block_qw.notified && !block_qw.done) {  // loop to avoid spurious wakeups
-            block_qw.cond_var.wait(block_lock);
-        }
-
-        if (block_qw.done) dict_qw.done = block_qw.done;
-
-        std::map<std::string, unsigned int> temp_dict;
-        std::vector<std::string> text;
-
-        text = block_qw.queue.front();
-        block_qw.queue.pop();
-
-        std::for_each(text.begin(), text.end(), [&symbols](std::string &line) { reduce_symbols(line, symbols); });
-
-        std::for_each(text.begin(), text.end(), [&temp_dict](std::string &line) {
-            std::vector<std::string> words = split(line);
-            std::for_each(words.begin(), words.end(), [&temp_dict](std::string &word) {
-                ++temp_dict[word];
-            });
-        });
-
-        std::unique_lock<std::mutex> dict_lock(dict_qw.queue_mutex);
-        dict_qw.queue.push(temp_dict);
-        dict_qw.notified = true;
-        dict_qw.cond_var.notify_one();
-
-        block_qw.notified = false;
     }
 }
 
@@ -123,6 +72,107 @@ template<class D>
 inline long long to_us(const D &d) {
     return std::chrono::duration_cast<std::chrono::microseconds>(d).count();
 }
+
+/*
+ * Reducer
+ */
+
+void update_dictionary(QueueWrapper<std::map<std::string, unsigned int>> &dict_qw,
+                       std::map<std::string, unsigned int> &general_dict) {
+
+    std::unique_lock<std::mutex> dict_lock(dict_qw.queue_mutex);
+
+    while (!(dict_qw.done && dict_qw.queue.empty())) {
+        if (!dict_qw.queue.empty()) {
+
+            std::map<std::string, unsigned int> temp_dict;
+
+            temp_dict = dict_qw.queue.front();
+            dict_qw.queue.pop();
+//            dict_qw.number++;
+            dict_lock.unlock();
+
+            std::for_each(temp_dict.begin(), temp_dict.end(),
+                          [&general_dict](std::pair<std::string, unsigned int> pair) {
+                              general_dict[pair.first] += pair.second;
+                          });
+
+            dict_lock.lock();
+        } else {
+            dict_qw.cond_var.wait(dict_lock);
+        }
+    }
+}
+
+/*
+ * Consumer
+ */
+
+void process_block(QueueWrapper<std::vector<std::string>> &block_qw,
+                   QueueWrapper<std::map<std::string, unsigned int>> &dict_qw,
+                   const std::string &symbols) {
+
+    std::unique_lock<std::mutex> block_lock(block_qw.queue_mutex);
+
+    while (!(block_qw.done && block_qw.queue.empty())) {
+        if (!block_qw.queue.empty()) {
+
+            if (block_qw.done) dict_qw.done = true;
+
+            std::map<std::string, unsigned int> temp_dict;
+            std::vector<std::string> text;
+
+            text = block_qw.queue.front();
+            block_qw.queue.pop();
+//            block_qw.number++;
+
+            block_lock.unlock();
+
+
+            std::for_each(text.begin(), text.end(), [&symbols](std::string &line) { reduce_symbols(line, symbols); });
+
+            std::for_each(text.begin(), text.end(), [&temp_dict](std::string &line) {
+                std::vector<std::string> words = split(line);
+                std::for_each(words.begin(), words.end(), [&temp_dict](std::string &word) {
+                    ++temp_dict[word];
+                });
+            });
+
+            std::unique_lock<std::mutex> dict_lock(dict_qw.queue_mutex);
+            dict_qw.queue.push(temp_dict);
+            dict_lock.unlock();
+
+            dict_qw.cond_var.notify_one();
+
+            block_lock.lock();
+        } else {
+            block_qw.cond_var.wait(block_lock);
+        }
+    }
+}
+
+/*
+ * Producer
+ */
+
+void read_block(const std::string &path, QueueWrapper<std::vector<std::string>> &block_qw, int block_size,
+                std::chrono::high_resolution_clock::time_point &read_finish_time) {
+    bool end_flag = false;
+    std::ifstream file_data(path);
+    while (!end_flag) {
+        std::vector<std::string> block;
+        read(file_data, block_size, &block, end_flag);
+        std::unique_lock<std::mutex> block_lock(block_qw.queue_mutex);
+        block_qw.queue.push(block);
+        block_lock.unlock();
+        block_qw.cond_var.notify_one();
+    }
+    block_qw.done = true;
+    block_qw.cond_var.notify_all();
+    file_data.close();
+    read_finish_time = get_current_time_fenced();
+}
+
 
 int main() {
 
@@ -178,36 +228,19 @@ int main() {
     threads_num = std::stoi(config_dict[threads_name]);
     block_size = std::stoi(config_dict[block_name]);
 
-    for (int i = 0; i < threads_num - 1; i++) {
-        threads.push_back(new std::thread(process_block, std::ref(block_qw), std::ref(dict_qw), symbols_g));
-    }
-
-    threads.push_back(new std::thread(update_dictionary, std::ref(dict_qw), std::ref(dictionary)));
-
-    file_data.open(config_dict[data_name]);
-
     /*
      * Start counting
      */
 
     count_start_time = get_current_time_fenced();
 
-    end_flag = false;
-
-    while (!end_flag) {
-        std::vector<std::string> block;
-        read(file_data, block_size, &block, end_flag);
-        std::unique_lock<std::mutex> lock(block_qw.queue_mutex);
-        block_qw.queue.push(block);
-//        std::cout << block_qw.queue.size() << std::endl;
-        block_qw.notified = true;
-        block_qw.cond_var.notify_one();
+    threads.push_back(new std::thread(read_block, std::ref(config_dict[data_name]), std::ref(block_qw), block_size,
+                                      std::ref(read_finish_time)));
+    threads.push_back(new std::thread(update_dictionary, std::ref(dict_qw), std::ref(dictionary)));
+    for (int i = 0; i < threads_num - 2; i++) {
+        threads.push_back(new std::thread(process_block, std::ref(block_qw), std::ref(dict_qw), symbols_g));
     }
 
-    block_qw.done = true;
-    block_qw.cond_var.notify_all();
-
-    file_data.close();
 
     read_finish_time = get_current_time_fenced();
 
@@ -219,6 +252,8 @@ int main() {
         thread->join();
     });
 
+//    std::cout << "Block number: " << block_qw.number << std::endl;
+//    std::cout << "Dict number: " << dict_qw.number << std::endl;
     count_finish_time = get_current_time_fenced();
 
     /*
@@ -229,8 +264,6 @@ int main() {
      * Start of writing
      */
     file_output_a.open(config_dict[output_a_name]);
-
-//    std::cout << dictionary.size()<<std::endl;
 
     std::for_each(dictionary.begin(), dictionary.end(), [&](std::pair<std::string, unsigned int> pair) {
         file_output_a << pair.first << " - " << pair.second << std::endl;
