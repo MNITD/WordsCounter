@@ -11,8 +11,8 @@
 #include <condition_variable>
 
 
-template <typename T>
-struct QueueWrapper{
+template<typename T>
+struct QueueWrapper {
     bool done = false;
     bool notified = false;
     std::queue<T> queue;
@@ -42,71 +42,74 @@ void reduce_symbols(std::string &line, const std::string &symbols) {
     }
 }
 
-void update_dictionary(std::map<std::string, unsigned int> &general_dict, std::map<std::string, unsigned int> &temp_dict,
-                  std::mutex &dict_mutex) {
+void update_dictionary(QueueWrapper<std::map<std::string, unsigned int>> &dict_qw,
+                        std::map<std::string, unsigned int> &general_dict) {
 
-    std::lock_guard<std::mutex> lock(dict_mutex);
-    std::for_each(temp_dict.begin(), temp_dict.end(), [&general_dict](std::pair<std::string, unsigned int> pair) {
-        general_dict[pair.first] += pair.second;
-    });
-}
+    std::unique_lock<std::mutex> dict_lock(dict_qw.queue_mutex);
 
-void thread_handler(std::vector<std::string> text, std::map<std::string, unsigned int> &dictionary, std::mutex &dict_mutex,
-               const std::string &symbols) {
+    while (!dict_qw.done) {
+        while (!dict_qw.notified && !dict_qw.done) {  // loop to avoid spurious wakeups
+            dict_qw.cond_var.wait(dict_lock);
+        }
+        std::map<std::string, unsigned int> temp_dict;
 
-    std::map<std::string, unsigned int> temp_dict;
+        temp_dict = dict_qw.queue.front();
+        dict_qw.queue.pop();
 
-    std::for_each(text.begin(), text.end(), [&symbols](std::string &line) { reduce_symbols(line, symbols); });
-
-    std::for_each(text.begin(), text.end(), [&temp_dict](std::string &line) {
-        std::vector<std::string> words = split(line);
-        std::for_each(words.begin(), words.end(), [&temp_dict](std::string &word) {
-            ++temp_dict[word];
+        std::for_each(temp_dict.begin(), temp_dict.end(), [&general_dict](std::pair<std::string, unsigned int> pair) {
+            general_dict[pair.first] += pair.second;
         });
-    });
-
-    update_dictionary(dictionary, temp_dict, dict_mutex);
+        dict_qw.notified = false;
+    }
 }
 
-void thread_handler2(QueueWrapper  <std::vector<std::string>> &block_qw, QueueWrapper  < std::map<std::string, unsigned int>> &dict_qw,
-               const std::string &symbols) {
+void process_block(QueueWrapper<std::vector<std::string>> &block_qw,
+                   QueueWrapper<std::map<std::string, unsigned int>> &dict_qw,
+                   const std::string &symbols) {
 
-    std::unique_lock<std::mutex> lock(block_qw.queue_mutex);
+    std::unique_lock<std::mutex> block_lock(block_qw.queue_mutex);
+
     while (!block_qw.done) {
         while (!block_qw.notified && !block_qw.done) {  // loop to avoid spurious wakeups
-            block_qw.cond_var.wait(lock);
+            block_qw.cond_var.wait(block_lock);
         }
-//        while (!block_qw.done && !block_qw.queue.empty()) {
-        while (!block_qw.queue.empty()) {
-            std::cout << "consuming "  << std::endl;
-            block_qw.queue.pop();
-        }
+
+        if (block_qw.done) dict_qw.done = block_qw.done;
+
+        std::map<std::string, unsigned int> temp_dict;
+        std::vector<std::string> text;
+
+        text = block_qw.queue.front();
+        block_qw.queue.pop();
+
+        std::for_each(text.begin(), text.end(), [&symbols](std::string &line) { reduce_symbols(line, symbols); });
+
+        std::for_each(text.begin(), text.end(), [&temp_dict](std::string &line) {
+            std::vector<std::string> words = split(line);
+            std::for_each(words.begin(), words.end(), [&temp_dict](std::string &word) {
+                ++temp_dict[word];
+            });
+        });
+
+        std::unique_lock<std::mutex> dict_lock(dict_qw.queue_mutex);
+        dict_qw.queue.push(temp_dict);
+        dict_qw.notified = true;
+        dict_qw.cond_var.notify_one();
+
         block_qw.notified = false;
     }
-    std::cout << "done "  << std::endl;
 }
 
-int get_size(std::string &filename) {
-
-    int size = 0;
-    std::string line;
-    std::ifstream file(filename);
-
-    while (std::getline(file, line))
-        size++;
-
-    return size;
-}
-
-void read(std::ifstream &file, int amount, std::vector<std::string> *text) {
+void read(std::ifstream &file, int amount, std::vector<std::string> *text, bool &end) {
 
     int i = 0;
     std::string line;
 
-    while (i < amount and std::getline(file, line)) {
+    while (i < amount && std::getline(file, line)) {
         text->push_back(line);
-        i++;
+        ++i;
     }
+    if (i == 0) end = true;
 }
 
 inline std::chrono::high_resolution_clock::time_point get_current_time_fenced() {
@@ -131,10 +134,9 @@ int main() {
     const std::string threads_name("threads");
     const std::string block_name("block");
     const std::string config_name("../addition/config.txt");
-    int lines_num = 0;
+    bool end_flag = false;
     int threads_num = 0;
     int block_size = 0;
-    int thread_line_num = 0;
     std::ifstream file_data;
     std::ifstream file_config(config_name);
     std::ofstream file_output_a;
@@ -145,19 +147,18 @@ int main() {
     std::vector<std::pair<unsigned int, std::string>> items;
     std::map<std::string, unsigned int> dictionary;
     std::map<std::string, std::string> config_dict;
-    std::mutex dict_mutex;
     std::chrono::high_resolution_clock::time_point read_start_time;
     std::chrono::high_resolution_clock::time_point read_finish_time;
     std::chrono::high_resolution_clock::time_point count_start_time;
     std::chrono::high_resolution_clock::time_point count_finish_time;
     std::chrono::high_resolution_clock::time_point write_finish_time;
-    QueueWrapper <std::vector<std::string>> block_qw;
-    QueueWrapper < std::map<std::string, unsigned int>> dict_qw;
+    QueueWrapper<std::vector<std::string>> block_qw;
+    QueueWrapper<std::map<std::string, unsigned int>> dict_qw;
     /*
      * Read config file and create config dictionary
      */
 
-    read(file_config, 5, &config_text);
+    read(file_config, 5, &config_text, end_flag);
     std::for_each(config_text.begin(), config_text.end(), [&symbols_c](std::string &line) {
         reduce_symbols(line, symbols_c);
     });
@@ -176,46 +177,35 @@ int main() {
 
     threads_num = std::stoi(config_dict[threads_name]);
     block_size = std::stoi(config_dict[block_name]);
-    lines_num = get_size(config_dict[data_name]);
 
-    if (lines_num < threads_num) {
-        threads_num = lines_num;
+    for (int i = 0; i < threads_num - 1; i++) {
+        threads.push_back(new std::thread(process_block, std::ref(block_qw), std::ref(dict_qw), symbols_g));
     }
 
-    thread_line_num = lines_num / threads_num;
+    threads.push_back(new std::thread(update_dictionary, std::ref(dict_qw), std::ref(dictionary)));
 
     file_data.open(config_dict[data_name]);
 
-    for (int i = 0; i < threads_num; i++) {
-        threads.push_back(new std::thread(thread_handler2, std::ref(block_qw), std::ref(dict_qw), symbols_g));
-    }
-//    std::this_thread::sleep_for(std::chrono::seconds(1));
-    {
-        std::unique_lock<std::mutex> lock(block_qw.queue_mutex);
-        std::cout << "producing " << std::endl;
+    /*
+     * Start counting
+     */
+
+    count_start_time = get_current_time_fenced();
+
+    end_flag = false;
+
+    while (!end_flag) {
         std::vector<std::string> block;
-        block.push_back(threads_name);
+        read(file_data, block_size, &block, end_flag);
+        std::unique_lock<std::mutex> lock(block_qw.queue_mutex);
         block_qw.queue.push(block);
+//        std::cout << block_qw.queue.size() << std::endl;
         block_qw.notified = true;
         block_qw.cond_var.notify_one();
     }
-//    std::this_thread::sleep_for(std::chrono::seconds(1));
+
     block_qw.done = true;
     block_qw.cond_var.notify_all();
-
-
-//    for (int i = 0; i < threads_num; i++) {
-//        std::vector<std::string> text_part;
-//        read(file_data, thread_line_num, &text_part);
-//
-//        /*
-//         * Start counting with a first thread
-//         */
-//
-//        if (i == 0) count_start_time = get_current_time_fenced();
-//
-//        threads.push_back(new std::thread(thread_handler, text_part, std::ref(dictionary), std::ref(dict_mutex), symbols_g));
-//    }
 
     file_data.close();
 
@@ -239,6 +229,8 @@ int main() {
      * Start of writing
      */
     file_output_a.open(config_dict[output_a_name]);
+
+//    std::cout << dictionary.size()<<std::endl;
 
     std::for_each(dictionary.begin(), dictionary.end(), [&](std::pair<std::string, unsigned int> pair) {
         file_output_a << pair.first << " - " << pair.second << std::endl;
