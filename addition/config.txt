@@ -2,3 +2,4 @@ infile="../addition/data.txt"
 out_by_a="../addition/res_a.txt"
 out_by_n="../addition/res_n.txt"
 threads=5
+block=20
